@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -17,7 +18,21 @@ type Normalizer struct {
 }
 
 func (n *Normalizer) Process(r io.Reader, w io.Writer) error {
-	reader := csv.NewReader(r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("reading input: %w", err)
+	}
+
+	if n.Lenient {
+		// A field opened with a quote but never closed makes Go's csv
+		// reader consume the rest of the input looking for the closing
+		// quote, then fail once it hits EOF. Closing it ourselves lets
+		// the rest of a merely-truncated field/quote survive instead of
+		// taking every row after it down with it.
+		data = closeUnterminatedQuote(data, byte(n.Delimiter))
+	}
+
+	reader := csv.NewReader(bytes.NewReader(data))
 	reader.Comma = n.Delimiter
 	reader.LazyQuotes = n.Lenient
 	if n.Lenient {
@@ -74,6 +89,48 @@ func (n *Normalizer) Process(r io.Reader, w io.Writer) error {
 	}
 
 	return writer.Error()
+}
+
+// closeUnterminatedQuote scans raw CSV bytes for a quoted field that is
+// still open when the input ends and appends the missing closing quote.
+// It only treats a quote as opening a field when it appears at the start
+// of a field (right after the start of input, a delimiter, or a record
+// break), mirroring how encoding/csv itself decides a field is quoted, so
+// stray quotes elsewhere in a field are left alone.
+func closeUnterminatedQuote(data []byte, delim byte) []byte {
+	inQuotes := false
+	atFieldStart := true
+
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		if inQuotes {
+			if c == '"' {
+				if i+1 < len(data) && data[i+1] == '"' {
+					i++ // escaped quote, still inside the field
+					continue
+				}
+				inQuotes = false
+				atFieldStart = false
+			}
+			continue
+		}
+		switch {
+		case c == '"' && atFieldStart:
+			inQuotes = true
+			atFieldStart = false
+		case c == delim || c == '\n':
+			atFieldStart = true
+		case c == '\r':
+			// leave atFieldStart as-is; '\n' right after decides it
+		default:
+			atFieldStart = false
+		}
+	}
+
+	if inQuotes {
+		return append(data, '"')
+	}
+	return data
 }
 
 func repairRecord(record []string) []string {

@@ -25,6 +25,8 @@ Pass `--lenient` and it becomes a repair tool instead:
 - leading/trailing whitespace is trimmed from every field
 - invalid UTF-8 bytes are replaced with `U+FFFD` instead of aborting
 - blank lines are dropped
+- a quoted field left open at the end of the file (missing closing quote)
+  is closed automatically instead of swallowing the rest of the input
 
 ## Usage
 
@@ -63,5 +65,5 @@ go build -o csv-tidy .
 
 ## Status
 
-Early skeleton. Field-count and UTF-8 checks work; quoting, encoding
-detection beyond UTF-8, and header-aware options are not built yet.
+Early skeleton. Field-count, UTF-8, and unterminated-quote checks work;
+encoding detection beyond UTF-8 and header-aware options are not built yet.
